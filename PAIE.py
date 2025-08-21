@@ -99,11 +99,44 @@ def get_session_messages_as_chatml(session_id, max_messages=30): # For fetchning
     rows = cur.fetchall(); conn.close()
     return [{"role": r, "content": c} for (r, c) in rows]
 
+def set_system_prompt(session_id, text):
+    """Persist a session-wide system prompt as a system message."""
+    conn = db(); cur = conn.cursor()
+    cur.execute("""
+        INSERT INTO messages (session_id, role, content, turn_index, meta_json)
+        VALUES (?, 'system', ?, ?, ?)
+    """, (session_id, text, -1, json.dumps({"type": "session_system"})))  # -1 keeps it first in order
+    conn.commit(); conn.close()
+
+def get_latest_system_prompt(session_id):
+    """Return the most recent system prompt for this session, if any."""
+    conn = db(); cur = conn.cursor()
+    cur.execute("""
+        SELECT content
+        FROM messages
+        WHERE session_id = ? AND role = 'system'
+        ORDER BY created_at DESC, id DESC
+        LIMIT 1
+    """, (session_id,))
+    row = cur.fetchone()
+    conn.close()
+    return row[0] if row else None
+
+def clear_system_prompt(session_id):
+    """Remove all system messages for this session (reset persona)."""
+    conn = db(); cur = conn.cursor()
+    cur.execute("DELETE FROM messages WHERE session_id = ? AND role = 'system'", (session_id,))
+    conn.commit(); conn.close()
+
 def ask_ollama(session_id, user_text, system_prompt=None): # Function to ask Ollama for a response based on the user input and session context
     # 1) store user message
     user_msg_id, t = add_user_message(session_id, user_text)
 
     # 2) build context (optional: include a system message at the top)
+    # NEW: if caller didn't pass one, fetch the latest stored system prompt
+    if system_prompt is None:
+        system_prompt = get_latest_system_prompt(session_id)
+
     messages = []
     if system_prompt:
         messages.append({"role": "system", "content": system_prompt})
@@ -163,13 +196,21 @@ if __name__ == "__main__":  # Interactive chat loop Test
         title = input("\nGive this chat a title (or press Enter for 'New chat'): ").strip() or "New chat"
         sid = create_session(title)
         print(f"Session started: {sid} — {title}")
+
+        inject = input("Add a session instruction/persona? (optional, press Enter to skip): ").strip()
+        if inject:
+            set_system_prompt(sid, inject)
+            print("Session instruction set ✅")
+        
         return sid
+
 
     sid = start_session()
 
     print(
         "\nType your message and press Enter.\n"
-        "Commands: /new (new session), /history (show last turns), /title (rename), /exit (quit)\n"
+    "Commands: /new (new session), /history (show last turns), /title (rename), "
+    "/system (set/update session instruction(prompt injection)), /showsys (view current prompt), /clearsys (remove current prompt), /exit (quit)\n"
     )
 
     # Optional: a default system prompt (persona & behavior). Leave None to skip.
@@ -206,6 +247,23 @@ if __name__ == "__main__":  # Interactive chat loop Test
                     cur.execute("UPDATE sessions SET title=? WHERE id=?", (new_title, sid))
                     conn.commit(); conn.close()
                     print("Title updated")
+                continue
+
+            if user_text.lower() == "/system":
+                new_sys = input("Enter new session instruction/persona (blank = cancel): ").strip()
+                if new_sys:
+                    set_system_prompt(sid, new_sys)
+                    print("Session instruction updated ✅")
+                continue
+
+            if user_text.lower() == "/showsys":
+                current = get_latest_system_prompt(sid)
+                print(f"\nCurrent session instruction:\n{current if current else '(none set)'}\n")
+                continue
+
+            if user_text.lower() == "/clearsys":
+                clear_system_prompt(sid)
+                print("Session instruction cleared ✅")
                 continue
 
             # Normal chat turn: ask model & store reply
