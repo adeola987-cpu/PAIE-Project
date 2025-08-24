@@ -1,0 +1,87 @@
+<!-- templates/index.html -->
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>PAIE Chat</title>
+
+  <!-- HTMX: gives us hx-get, hx-post, hx-swap, etc. -->
+  <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+
+  <!-- Optional CSS file if you want to separate styling -->
+  <link rel="stylesheet" href="/static/styles.css" />
+
+  <style>
+    /* Minimal inline styles (safe even if styles.css is missing) */
+    body { font-family: system-ui, sans-serif; margin: 2rem auto; max-width: 800px; }
+    h1 { margin-bottom: 1rem; }
+    #chatbox { border: 1px solid #ccc; padding: 1rem; min-height: 300px; border-radius: 8px; }
+    .msg { margin: .5rem 0; display: flex; }
+    .msg.user { justify-content: flex-end; }
+    .bubble { padding: .6rem .9rem; border-radius: 12px; max-width: 70%; }
+    .msg.user .bubble { background: #e6f0ff; }
+    .msg.assistant .bubble { background: #f2f2f2; }
+    .msg.system .bubble { background: #fff0d6; font-style: italic; }
+    form { display: flex; gap: .5rem; margin-top: 1rem; }
+    textarea { flex: 1; resize: vertical; }
+    button { padding: .5rem 1rem; border-radius: 6px; border: 1px solid #999; background: #f9f9f9; cursor: pointer; }
+    button:hover { background: #eee; }
+    .system-box { margin: 1rem 0; padding: .5rem; border: 1px dashed #ccc; border-radius: 6px; }
+  </style>
+</head>
+<body>
+
+  <h1>PAIE — Local Chat</h1>
+
+  <!-- System prompt controls -->
+  <div class="system-box">
+    <strong>System Prompt:</strong>
+    <form hx-post="/api/system"
+          hx-swap="none"
+          hx-include="[name=session_id]"
+          style="margin-top:.5rem;">
+      <input type="hidden" name="session_id" value="{{ session_id }}" />
+      <textarea name="prompt" rows="2" style="width:100%;" placeholder="Set persona/instruction...">{{ system_prompt }}</textarea>
+      <div style="margin-top:.3rem;">
+        <button type="submit">Update Prompt</button>
+        <!-- delete is a separate form -->
+        <button type="button"
+                hx-delete="/api/system?session_id={{ session_id }}"
+                hx-swap="none">Clear Prompt</button>
+      </div>
+    </form>
+  </div>
+
+  <!-- Chat messages area -->
+  <div id="chatbox"
+       hx-get="/fragment/messages?session_id={{ session_id }}"
+       hx-trigger="load, every 2s"
+       hx-swap="innerHTML">
+    <!-- HTMX will fill this with message bubbles -->
+  </div>
+
+  <!-- Chat input form -->
+  <form hx-post="/api/chat"
+        hx-swap="none"
+        hx-include="[name=session_id]"
+        hx-on::after-request="this.reset(); htmx.trigger('#chatbox','refresh')">
+    <input type="hidden" name="session_id" value="{{ session_id }}" />
+    <textarea name="text" rows="3" placeholder="Type your message…"></textarea>
+    <button type="submit">Send</button>
+  </form>
+
+  <!-- Sessions list (optional — shows in plain text for now) -->
+  <div style="margin-top:2rem;">
+    <h3>Sessions</h3>
+    <ul>
+      {% for s in sessions %}
+        <li>
+          <a href="/?session_id={{ s.id }}">{{ s.title }}</a>
+          <small>({{ s.created_at }})</small>
+        </li>
+      {% endfor %}
+    </ul>
+  </div>
+
+</body>
+</html>
