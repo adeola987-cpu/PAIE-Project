@@ -114,11 +114,16 @@ def home(request: Request, session_id: Optional[int] = None):
     sid = session_id or ensure_session()
     sessions = list_sessions()      # show in a sidebar or dropdown if you like
     system_prompt = get_latest_system_prompt(sid)
+    # find the current session's title so the header can show it
+    current = next((s for s in sessions if s["id"] == sid), None)
+    current_title = current["title"] if current else f"Session {sid}"
+
     return templates.TemplateResponse(
         "index.html",
         {
             "request": request,
             "session_id": sid,
+            "session_title": current_title,   # <-- new
             "sessions": sessions,
             "system_prompt": system_prompt or "",
         },
@@ -145,6 +150,13 @@ def api_create_session(title: str = Form("New chat")):
     """
     sid = create_session(title)
     return {"id": sid, "title": title}
+
+@app.post("/api/sessions/rename")
+def api_rename_session(session_id: int = Form(...), title: str = Form(...)):
+    conn = db(); cur = conn.cursor()
+    cur.execute("UPDATE sessions SET title = ? WHERE id = ?", (title, session_id))
+    conn.commit(); conn.close()
+    return {"ok": True, "id": session_id, "title": title}
 
 
 @app.get("/api/messages")

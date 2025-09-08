@@ -1,87 +1,146 @@
-<!-- templates/index.html -->
 <!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
   <title>PAIE Chat</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
 
-  <!-- HTMX: gives us hx-get, hx-post, hx-swap, etc. -->
   <script src="https://unpkg.com/htmx.org@1.9.12"></script>
-
-  <!-- Optional CSS file if you want to separate styling -->
   <link rel="stylesheet" href="/static/styles.css" />
-
-  <style>
-    /* Minimal inline styles (safe even if styles.css is missing) */
-    body { font-family: system-ui, sans-serif; margin: 2rem auto; max-width: 800px; }
-    h1 { margin-bottom: 1rem; }
-    #chatbox { border: 1px solid #ccc; padding: 1rem; min-height: 300px; border-radius: 8px; }
-    .msg { margin: .5rem 0; display: flex; }
-    .msg.user { justify-content: flex-end; }
-    .bubble { padding: .6rem .9rem; border-radius: 12px; max-width: 70%; }
-    .msg.user .bubble { background: #e6f0ff; }
-    .msg.assistant .bubble { background: #f2f2f2; }
-    .msg.system .bubble { background: #fff0d6; font-style: italic; }
-    form { display: flex; gap: .5rem; margin-top: 1rem; }
-    textarea { flex: 1; resize: vertical; }
-    button { padding: .5rem 1rem; border-radius: 6px; border: 1px solid #999; background: #f9f9f9; cursor: pointer; }
-    button:hover { background: #eee; }
-    .system-box { margin: 1rem 0; padding: .5rem; border: 1px dashed #ccc; border-radius: 6px; }
-  </style>
 </head>
-<body>
+<body class="app">
 
-  <h1>PAIE — Local Chat</h1>
+  <!-- Drawer toggle -->
+  <input id="drawer-toggle" type="checkbox" class="drawer-toggle" />
 
-  <!-- System prompt controls -->
-  <div class="system-box">
-    <strong>System Prompt:</strong>
-    <form hx-post="/api/system"
-          hx-swap="none"
-          hx-include="[name=session_id]"
-          style="margin-top:.5rem;">
-      <input type="hidden" name="session_id" value="{{ session_id }}" />
-      <textarea name="prompt" rows="2" style="width:100%;" placeholder="Set persona/instruction...">{{ system_prompt }}</textarea>
-      <div style="margin-top:.3rem;">
-        <button type="submit">Update Prompt</button>
-        <!-- delete is a separate form -->
-        <button type="button"
-                hx-delete="/api/system?session_id={{ session_id }}"
-                hx-swap="none">Clear Prompt</button>
+  <!-- Top bar -->
+  <header class="topbar">
+    <label for="drawer-toggle" class="btn ghost" title="Open sessions">☰</label>
+    <div class="brand">PAIE — Local Chat</div>
+    <div class="spacer"></div>
+  </header>
+
+  <div class="layout">
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <h3>Sessions</h3>
+        <label for="drawer-toggle" class="btn ghost close">×</label>
       </div>
-    </form>
+
+      <nav class="sessions">
+        <ul>
+          {% for s in sessions %}
+          <li class="session-item {% if s.id == session_id %}active{% endif %}">
+            <a class="session-link" href="/?session_id={{ s.id }}">{{ s.title }}</a>
+            <div class="session-meta">{{ s.created_at }}</div>
+          </li>
+          {% endfor %}
+        </ul>
+      </nav>
+
+      <div class="new-session">
+        <h4>New session</h4>
+        <form hx-post="/api/sessions"
+              hx-swap="none"
+              hx-on::after-request="try{const r=JSON.parse(event.detail.xhr.responseText); window.location='/?session_id='+r.id;}catch(e){window.location.reload();}">
+          <input class="input" type="text" name="title" placeholder="Title (optional)" />
+          <button class="btn primary" type="submit">Create</button>
+        </form>
+      </div>
+    </aside>
+
+    <!-- Main -->
+    <main class="content">
+
+      <!-- System Prompt (collapsible) -->
+      <section class="card collapsible">
+        <details {% if system_prompt %}open{% endif %}>
+          <summary class="card-header as-summary">
+            <div class="card-title">System Prompt</div>
+            <div class="card-subtitle">Controls instruction/persona</div>
+          </summary>
+
+          <div class="card-body">
+            <form hx-post="/api/system"
+                  hx-swap="none"
+                  hx-include="[name=session_id]">
+              <input type="hidden" name="session_id" value="{{ session_id }}" />
+              <textarea class="textarea lg" name="prompt" rows="3" placeholder="Set persona/instruction…">{{ system_prompt }}</textarea>
+              <div class="card-footer row">
+                <button class="btn primary" type="submit">Update Prompt</button>
+                <button class="btn subtle" type="button"
+                        hx-delete="/api/system?session_id={{ session_id }}"
+                        hx-swap="none">Clear</button>
+              </div>
+            </form>
+          </div>
+        </details>
+      </section>
+
+      <!-- Chat -->
+      <section class="chat card">
+        <div class="card-header">
+          <div class="card-title truncate" title="{{ session_title }}">{{ session_title }}</div>
+          <div class="card-subtitle">Session #{{ session_id }}</div>
+          <div class="card-actions">
+
+            <!-- Rename (inline) -->
+            <details class="rename-wrap">
+              <summary class="btn subtle">Rename</summary>
+              <form class="rename-form"
+                    hx-post="/api/sessions/rename"
+                    hx-swap="none"
+                    hx-indicator=".rename-indicator"
+                    hx-on::after-request="try{const r=JSON.parse(event.detail.xhr.responseText); window.location='/?session_id='+r.id;}catch(e){window.location.reload();}">
+                <input type="hidden" name="session_id" value="{{ session_id }}" />
+                <input class="input" type="text" name="title" value="{{ session_title }}" />
+                <div class="row">
+                  <button class="btn primary" type="submit">Save</button>
+                  <div class="rename-indicator htmx-indicator">Saving…</div>
+                </div>
+              </form>
+            </details>
+
+          </div>
+        </div>
+
+        <!-- Messages -->
+        <div id="chatbox"
+             class="chatbox"
+             hx-get="/fragment/messages?session_id={{ session_id }}"
+             hx-trigger="load, every 1.5s, refresh from:body"
+             hx-swap="innerHTML">
+        </div>
+
+        <!-- Input -->
+        <form class="chat-input"
+              hx-post="/api/chat"
+              hx-swap="none"
+              hx-include="[name=session_id]"
+              hx-disabled-elt="find button, textarea"
+              hx-indicator=".send-indicator"
+              hx-on::after-request="this.reset(); htmx.trigger('#chatbox','refresh')">
+          <input type="hidden" name="session_id" value="{{ session_id }}" />
+          <textarea class="textarea rounded lg" name="text" rows="3" placeholder="Type your message… (Shift+Enter for new line)"></textarea>
+          <div class="row">
+            <div class="send-indicator htmx-indicator">Sending…</div>
+            <button class="btn primary" type="submit" title="Send">Send</button>
+          </div>
+        </form>
+      </section>
+
+    </main>
   </div>
 
-  <!-- Chat messages area -->
-  <div id="chatbox"
-       hx-get="/fragment/messages?session_id={{ session_id }}"
-       hx-trigger="load, every 2s"
-       hx-swap="innerHTML">
-    <!-- HTMX will fill this with message bubbles -->
-  </div>
-
-  <!-- Chat input form -->
-  <form hx-post="/api/chat"
-        hx-swap="none"
-        hx-include="[name=session_id]"
-        hx-on::after-request="this.reset(); htmx.trigger('#chatbox','refresh')">
-    <input type="hidden" name="session_id" value="{{ session_id }}" />
-    <textarea name="text" rows="3" placeholder="Type your message…"></textarea>
-    <button type="submit">Send</button>
-  </form>
-
-  <!-- Sessions list (optional — shows in plain text for now) -->
-  <div style="margin-top:2rem;">
-    <h3>Sessions</h3>
-    <ul>
-      {% for s in sessions %}
-        <li>
-          <a href="/?session_id={{ s.id }}">{{ s.title }}</a>
-          <small>({{ s.created_at }})</small>
-        </li>
-      {% endfor %}
-    </ul>
-  </div>
-
+  <!-- Autoscroll to bottom after message refresh -->
+  <script>
+    document.body.addEventListener('htmx:afterSwap', function (e) {
+      if (e.detail && e.detail.target && e.detail.target.id === 'chatbox') {
+        const box = document.getElementById('chatbox');
+        box.scrollTop = box.scrollHeight;
+      }
+    });
+  </script>
 </body>
 </html>
